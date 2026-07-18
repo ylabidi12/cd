@@ -11,6 +11,8 @@ const SAMPLE_RATE = 24000;
 const AUDIO_CHUNK_DURATION = 0.1; // seconds
 const BUFFER_SIZE = 4096; // Increased buffer size for smoother audio
 
+let isListeningPaused = false;
+
 let hiddenVideo = null;
 let offscreenCanvas = null;
 let offscreenContext = null;
@@ -375,6 +377,11 @@ function setupLinuxMicProcessing(micStream) {
     const samplesPerChunk = SAMPLE_RATE * AUDIO_CHUNK_DURATION;
 
     micProcessor.onaudioprocess = async e => {
+        if (isListeningPaused) {
+            audioBuffer.length = 0;
+            return;
+        }
+
         const inputData = e.inputBuffer.getChannelData(0);
         audioBuffer.push(...inputData);
 
@@ -408,6 +415,11 @@ function setupLinuxSystemAudioProcessing() {
     const samplesPerChunk = SAMPLE_RATE * AUDIO_CHUNK_DURATION;
 
     audioProcessor.onaudioprocess = async e => {
+        if (isListeningPaused) {
+            audioBuffer.length = 0;
+            return;
+        }
+
         const inputData = e.inputBuffer.getChannelData(0);
         audioBuffer.push(...inputData);
 
@@ -438,6 +450,11 @@ function setupWindowsLoopbackProcessing() {
     const samplesPerChunk = SAMPLE_RATE * AUDIO_CHUNK_DURATION;
 
     audioProcessor.onaudioprocess = async e => {
+        if (isListeningPaused) {
+            audioBuffer.length = 0;
+            return;
+        }
+
         const inputData = e.inputBuffer.getChannelData(0);
         audioBuffer.push(...inputData);
 
@@ -658,10 +675,24 @@ async function captureManualScreenshot(imageQuality = null) {
     );
 }
 
+// Pause/resume sending captured audio. The Gemini session stays open, so
+// toggling back on resumes immediately without a reconnect.
+async function setListeningPaused(paused) {
+    isListeningPaused = !!paused;
+    await ipcRenderer.invoke('set-listening-paused', isListeningPaused);
+    return isListeningPaused;
+}
+
+function isListening() {
+    return !isListeningPaused;
+}
+
 // Expose functions to global scope for external access
 window.captureManualScreenshot = captureManualScreenshot;
 
 function stopCapture() {
+    isListeningPaused = false;
+
     if (screenshotInterval) {
         clearInterval(screenshotInterval);
         screenshotInterval = null;
@@ -1031,6 +1062,8 @@ const cheatingDaddy = {
     initializeLocal,
     startCapture,
     stopCapture,
+    setListeningPaused,
+    isListening,
     sendTextMessage,
     handleShortcut,
 

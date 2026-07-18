@@ -16,6 +16,10 @@ function getLocalAi() {
 // Provider mode: 'byok', 'cloud', or 'local'
 let currentProviderMode = 'byok';
 
+// When true, incoming audio is dropped before it reaches any provider.
+// The session stays open so toggling back on is instant.
+let listeningPaused = false;
+
 // Groq conversation history for context
 let groqConversationHistory = [];
 
@@ -442,6 +446,7 @@ async function initializeGeminiSession(apiKey, customPrompt = '', profile = 'int
     if (!isReconnect) {
         sessionParams = { apiKey, customPrompt, profile, language };
         reconnectAttempts = 0;
+        listeningPaused = false; // Always start a fresh session listening
     }
 
     const client = new GoogleGenAI({
@@ -694,6 +699,13 @@ async function startMacOSAudioCapture(geminiSessionRef) {
     let audioBuffer = Buffer.alloc(0);
 
     systemAudioProc.stdout.on('data', data => {
+        // Drop captured audio while paused, but keep draining stdout so the
+        // helper process doesn't block on a full pipe.
+        if (listeningPaused) {
+            audioBuffer = Buffer.alloc(0);
+            return;
+        }
+
         audioBuffer = Buffer.concat([audioBuffer, data]);
 
         while (audioBuffer.length >= CHUNK_SIZE) {
@@ -761,6 +773,7 @@ function stopMacOSAudioCapture() {
 }
 
 async function sendAudioToGemini(base64Data, geminiSessionRef) {
+    if (listeningPaused) return;
     if (!geminiSessionRef.current) return;
 
     try {
@@ -874,7 +887,22 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
         return success;
     });
 
+    ipcMain.handle('set-listening-paused', async (event, paused) => {
+        listeningPaused = !!paused;
+
+        // Drop any partial utterance so resuming doesn't stitch together
+        // speech from before and after the pause.
+        if (listeningPaused) {
+            currentTranscription = '';
+        }
+
+        console.log(listeningPaused ? 'Listening paused' : 'Listening resumed');
+        sendToRenderer('update-status', listeningPaused ? 'Paused' : 'Listening...');
+        return { success: true, paused: listeningPaused };
+    });
+
     ipcMain.handle('send-audio-content', async (event, { data, mimeType }) => {
+        if (listeningPaused) return { success: true, paused: true };
         if (currentProviderMode === 'cloud') {
             try {
                 const pcmBuffer = Buffer.from(data, 'base64');
@@ -910,6 +938,7 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
 
     // Handle microphone audio on a separate channel
     ipcMain.handle('send-mic-audio-content', async (event, { data, mimeType }) => {
+        if (listeningPaused) return { success: true, paused: true };
         if (currentProviderMode === 'cloud') {
             try {
                 const pcmBuffer = Buffer.from(data, 'base64');

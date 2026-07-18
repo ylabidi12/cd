@@ -291,6 +291,55 @@ export class AssistantView extends LitElement {
             opacity: 0;
         }
 
+        .listen-btn {
+            background: var(--bg-elevated);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: var(--font-size-xs);
+            font-family: var(--font-mono);
+            white-space: nowrap;
+            padding: var(--space-xs) var(--space-md);
+            border-radius: 100px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            transition: border-color 0.4s ease, background var(--transition);
+            flex-shrink: 0;
+        }
+
+        .listen-btn:hover {
+            border-color: var(--accent);
+            background: var(--bg-surface);
+        }
+
+        /* Paused is the state worth noticing at a glance, so it gets the
+           loud treatment rather than the default. */
+        .listen-btn.paused {
+            border-color: #e5534b;
+            color: #e5534b;
+        }
+
+        .listen-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #3fb950;
+            flex-shrink: 0;
+            animation: listen-pulse 2s ease-in-out infinite;
+        }
+
+        .listen-btn.paused .listen-dot {
+            background: #e5534b;
+            animation: none;
+        }
+
+        @keyframes listen-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.35; }
+        }
+
         .analyze-canvas {
             position: absolute;
             inset: -1px;
@@ -307,6 +356,7 @@ export class AssistantView extends LitElement {
         onSendText: { type: Function },
         shouldAnimateResponse: { type: Boolean },
         isAnalyzing: { type: Boolean, state: true },
+        isPaused: { type: Boolean, state: true },
     };
 
     constructor() {
@@ -316,7 +366,20 @@ export class AssistantView extends LitElement {
         this.selectedProfile = 'interview';
         this.onSendText = () => {};
         this.isAnalyzing = false;
+        this.isPaused = false;
         this._animFrame = null;
+    }
+
+    async handleToggleListening() {
+        const paused = !this.isPaused;
+        this.isPaused = paused;
+        try {
+            await cheatingDaddy.setListeningPaused(paused);
+        } catch (e) {
+            console.error('Failed to toggle listening:', e);
+            this.isPaused = !paused; // Roll back so the button reflects reality
+        }
+        this.requestUpdate();
     }
 
     getProfileNames() {
@@ -695,6 +758,14 @@ export class AssistantView extends LitElement {
                         @keydown=${this.handleTextKeydown}
                     />
                 </div>
+                <button
+                    class="listen-btn ${this.isPaused ? 'paused' : ''}"
+                    @click=${this.handleToggleListening}
+                    title=${this.isPaused ? 'Resume listening to the interview' : 'Stop listening to the interview'}
+                >
+                    <span class="listen-dot"></span>
+                    ${this.isPaused ? 'Paused' : 'Listening'}
+                </button>
                 <button class="analyze-btn ${this.isAnalyzing ? 'analyzing' : ''}" @click=${this.handleScreenAnswer}>
                     <canvas class="analyze-canvas"></canvas>
                     <span class="analyze-btn-content">
